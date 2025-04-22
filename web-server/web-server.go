@@ -24,5 +24,6 @@ func startServer() {
 }
 
 func main() {
+	// Use 'go run .\web-server\web-server.go' or press run in VSCode with GO extension
 	startServer()
 }
