@@ -1,6 +1,19 @@
--- TODO: Initialize relational tables
+DROP TABLE IF EXISTS users;
+DROP TABLE IF EXISTS Payment;
+DROP TABLE IF EXISTS Billing;
+DROP TABLE IF EXISTS Meter;
+DROP TABLE IF EXISTS Customer;
+
+CREATE TABLE users (
+  id SERIAL PRIMARY KEY,
+  username VARCHAR(50),
+  password_hash VARCHAR(255) NOT NULL,
+  email VARCHAR(100) UNIQUE,
+  permission VARCHAR(50)
+);
+
 CREATE TABLE Customer (
-    Customer_ID INT PRIMARY KEY,
+    Customer_ID SERIAL PRIMARY KEY,
     Name VARCHAR (100),
     Address VARCHAR (255),
     Email VARCHAR (100),
@@ -8,7 +21,7 @@ CREATE TABLE Customer (
 );
 
 CREATE TABLE Meter(
-    Meter_ID INT PRIMARY KEY,
+    Meter_ID SERIAL PRIMARY KEY,
     Customer_ID INT,
     Meter_Number VARCHAR (50),
     Installation_Date Date,
@@ -17,7 +30,7 @@ CREATE TABLE Meter(
 );
 
 CREATE TABLE Billing(
-    Bill_ID INT PRIMARY KEY,
+    Bill_ID SERIAL PRIMARY KEY,
     Customer_ID INT,
     Meter_ID INT,
     Billing_Date DATE,
@@ -30,13 +43,19 @@ CREATE TABLE Billing(
 );
 
 CREATE TABLE Payment (
-    Payment_ID INT PRIMARY KEY,
+    Payment_ID SERIAL PRIMARY KEY,
     Bill_ID INT,
     Payment_Date DATE,
     Amount_Paid DECIMAL(10, 2),
     Payment_Method VARCHAR(50),
     FOREIGN KEY (Bill_ID) REFERENCES Billing(Bill_ID)
 );
+
+-- Sample user (replace with your actual hashed password generation)
+-- Password for 'admin' is 'root'
+-- Bcrypt hash for 'root' (cost 10): $2a$10$nAIL5przC.RemyJ2CDmWKetjj1LnM64dwgtxj6SJ/kHlncKpihk6K
+INSERT INTO users (username, password_hash, email, permission) VALUES
+('admin', '$2a$10$nAIL5przC.RemyJ2CDmWKetjj1LnM64dwgtxj6SJ/kHlncKpihk6K', 'admin@example.com', 'administrator');
 
 INSERT INTO Customer (Customer_ID, Name, Address, Email, Phone_Number) VALUES
 (1, 'Alice Dearest', '123 Maple Street', 'alice@example.com', '123-456-7890'),
@@ -58,4 +77,4 @@ INSERT INTO Payment (Payment_ID, Bill_ID, Payment_Date, Amount_Paid, Payment_Met
 (5002, 1001, '2024-04-10', 60.25, 'Credit Card'),
 (5003, 1003, '2024-04-10', 60.25, 'Credit Card');
 
-
+SELECT * FROM Customer;
