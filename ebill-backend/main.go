@@ -21,7 +21,7 @@ import (
 var db *sql.DB
 
 // jwtKey should be loaded from an environment variable in production!
-var jwtKey = []byte("your_very_secret_key_that_should_be_long_and_random_and_at_least_32_bytes")
+var jwtKey = []byte("idkwhattosetthiskeyto")
 
 // --- Struct Definitions Aligned with initialize_table.sql ---
 
