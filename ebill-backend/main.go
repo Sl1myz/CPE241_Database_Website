@@ -789,6 +789,151 @@ func deletePayment(w http.ResponseWriter, r *http.Request) {
 	respondWithJSON(w, http.StatusOK, map[string]string{"message": "Payment deleted successfully"})
 }
 
+// --- Public Customer Portal Handlers ---
+func getCustomerUnpaidBills(w http.ResponseWriter, r *http.Request) {
+	log.Println("API: getCustomerUnpaidBills called")
+	identifier := r.URL.Query().Get("identifier")
+
+	if identifier == "" {
+		respondWithError(w, http.StatusBadRequest, "Identifier (email or phone number) is required")
+		return
+	}
+
+	var customerID int
+	// Try to find customer by email or phone number
+	// Ensure the customer is active if that's a business rule
+	err := db.QueryRow(`SELECT "customer_id" FROM "customer" WHERE ("email" = $1 OR "phone_number" = $1)`, identifier).Scan(&customerID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			log.Printf("No customer found for identifier: %s", identifier)
+			respondWithJSON(w, http.StatusOK, []Billing{}) // Return empty array if no customer found
+			return
+		}
+		respondWithError(w, http.StatusInternalServerError, "Error finding customer: "+err.Error())
+		return
+	}
+
+	// Fetch unpaid bills for the customer
+	rows, err := db.Query(`SELECT "bill_id", "customer_id", "meter_id", "billing_date", "due_date", 
+	                        "previous_reading", "current_reading", "rate_applied", "total_unit", "amount_due", "paid_status" 
+	                        FROM "billing" WHERE "customer_id" = $1 AND "paid_status" = FALSE ORDER BY "due_date" ASC`, customerID)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to retrieve bills: "+err.Error())
+		return
+	}
+	defer rows.Close()
+
+	bills := []Billing{}
+	for rows.Next() {
+		var b Billing
+		if err := rows.Scan(&b.BillID, &b.CustomerID, &b.MeterID, &b.BillingDate, &b.DueDate,
+			&b.ReadingPrevious, &b.ReadingCurrent, &b.RateApplied, &b.TotalUnit, &b.AmountDue, &b.PaidStatus); err != nil {
+			respondWithError(w, http.StatusInternalServerError, "Error scanning bill data: "+err.Error())
+			return
+		}
+		bills = append(bills, b)
+	}
+	if err = rows.Err(); err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Error iterating bill rows: "+err.Error())
+		return
+	}
+
+	respondWithJSON(w, http.StatusOK, bills)
+}
+
+type PublicPaymentRequest struct {
+	PaymentMethod string `json:"payment_method"`
+}
+
+func handlePayBillPublic(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	billIDStr, ok := vars["id"]
+	if !ok {
+		respondWithError(w, http.StatusBadRequest, "Bill ID not provided in path")
+		return
+	}
+	billID, err := strconv.Atoi(billIDStr)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid Bill ID format: "+err.Error())
+		return
+	}
+
+	var req PublicPaymentRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid request body: "+err.Error())
+		return
+	}
+	if req.PaymentMethod == "" {
+		respondWithError(w, http.StatusBadRequest, "Payment method is required")
+		return
+	}
+
+	log.Printf("API: handlePayBillPublic called for Bill ID: %d with method: %s", billID, req.PaymentMethod)
+
+	// Start a transaction
+	tx, err := db.Begin()
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to start database transaction: "+err.Error())
+		return
+	}
+	defer tx.Rollback() // Rollback if anything goes wrong
+
+	// 1. Fetch the bill to get amount_due and check if already paid
+	var billToPay Billing
+	selectBillSQL := `SELECT "amount_due", "paid_status" FROM "billing" WHERE "bill_id" = $1 FOR UPDATE` // Lock the row
+	err = tx.QueryRow(selectBillSQL, billID).Scan(&billToPay.AmountDue, &billToPay.PaidStatus)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			respondWithError(w, http.StatusNotFound, "Bill not found")
+		} else {
+			respondWithError(w, http.StatusInternalServerError, "Failed to retrieve bill details: "+err.Error())
+		}
+		return
+	}
+
+	if billToPay.PaidStatus {
+		respondWithJSON(w, http.StatusOK, map[string]string{"message": "This bill has already been paid."})
+		return // No need to commit, transaction will be rolled back by defer
+	}
+
+	// 2. Update billing table
+	updateBillSQL := `UPDATE "billing" SET "paid_status" = TRUE WHERE "bill_id" = $1`
+	_, err = tx.Exec(updateBillSQL, billID)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to update bill status: "+err.Error())
+		return
+	}
+
+	// 3. Insert into payment table
+	// For ProcessedBy, using 0 as a placeholder for system/public payment.
+	// Adjust if you have a specific system user ID or if the column is nullable.
+	insertPaymentSQL := `INSERT INTO "payment" ("bill_id", "processed_by", "payment_date", "amount_paid", "payment_method", "payment_status")
+	                     VALUES ($1, $2, $3, $4, $5, $6) RETURNING "payment_id"`
+	paymentDate := time.Now().Format("2006-01-02")
+	var paymentID int
+
+	log.Printf("Attempting to insert payment with values: BillID=%d, ProcessedBy=nil, PaymentDate='%s', AmountPaid=%.2f, PaymentMethod='%s', PaymentStatus='Completed'",
+		billID,
+		paymentDate,
+		billToPay.AmountDue,
+		req.PaymentMethod)
+
+	err = tx.QueryRow(insertPaymentSQL, billID, 0, paymentDate, billToPay.AmountDue, req.PaymentMethod, "Completed").Scan(&paymentID)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to record payment: "+err.Error())
+		return
+	}
+
+	// Commit the transaction
+	if err := tx.Commit(); err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to commit transaction: "+err.Error())
+		return
+	}
+
+	log.Printf("Payment successful for Bill ID: %d, new Payment ID: %d", billID, paymentID)
+	respondWithJSON(w, http.StatusOK, map[string]interface{}{"message": "Payment successful!", "payment_id": paymentID})
+}
+
 func main() {
 	envJwtKey := os.Getenv("JWT_SECRET_KEY")
 	if envJwtKey != "" {
@@ -807,6 +952,20 @@ func main() {
 	// User list route (not under /api, but requires auth)
 	// http.HandlerFunc(getUsers) converts getUsers to an http.Handler, which authMiddleware expects.
 	router.HandleFunc("/users", authMiddleware(http.HandlerFunc(getUsers)).(http.HandlerFunc)).Methods("GET", "OPTIONS")
+
+	// Explicitly define the /api/public/customer-bills route BEFORE apiRouter
+	// This ensures it's handled by getCustomerUnpaidBills and global CORS,
+	// and importantly, it bypasses apiRouter's authMiddleware for this specific path.
+	router.HandleFunc("/api/public/customer-bills", getCustomerUnpaidBills).Methods("GET", "OPTIONS")
+
+	// Explicitly define the /api/public/bills/{id}/pay route BEFORE apiRouter
+	// This ensures it's handled by handlePayBillPublic and global CORS,
+	// and bypasses apiRouter's authMiddleware for this specific path.
+	router.HandleFunc("/api/public/bills/{id}/pay", handlePayBillPublic).Methods("POST", "OPTIONS")
+
+	publicRouter := router.PathPrefix("/public").Subrouter()
+	publicRouter.HandleFunc("/customer-bills", getCustomerUnpaidBills).Methods("GET", "OPTIONS")
+	publicRouter.HandleFunc("/bills/{id}/pay", handlePayBillPublic).Methods("POST", "OPTIONS") // New route for paying a bill
 
 	// API Subrouter for all other authenticated CRUD operations
 	apiRouter := router.PathPrefix("/api").Subrouter()

@@ -19,7 +19,7 @@ CREATE TABLE Customer (
     Name VARCHAR (100) NOT NULL,
     Address VARCHAR (255) NOT NULL,
     Email VARCHAR (100) NOT NULL UNIQUE CHECK (email ~* '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$'),
-    Phone_Number VARCHAR(15) CHECK (Phone_Number ~ '^\d{3}-\d{3}-\d{4}$'),
+    Phone_Number VARCHAR(15) NOT NULL UNIQUE CHECK (Phone_Number ~ '^\d{3}-\d{3}-\d{4}$'),
     Registration_Date DATE NOT NULL DEFAULT CURRENT_DATE
 );
 
@@ -45,7 +45,7 @@ CREATE TABLE Billing(
     Current_Reading DECIMAL(10, 2) NOT NULL CHECK (Current_Reading >= Previous_Reading),
     Total_Unit DECIMAL(10, 2) GENERATED ALWAYS AS (Current_Reading - Previous_Reading) STORED,
     Rate_Applied DECIMAL(10, 4) NOT NULL CHECK (Rate_Applied > 0),
-    Amount_Due DECIMAL(10, 2) NOT NULL CHECK (Amount_Due >= 0),
+    Amount_Due DECIMAL(10, 2), -- Will be calculated by trigger, so NOT NULL can be enforced by trigger or kept if default is set
     Paid_Status BOOLEAN NOT NULL DEFAULT FALSE,
     FOREIGN KEY (Customer_ID) REFERENCES Customer(Customer_ID),
     FOREIGN KEY (Meter_ID) REFERENCES Meter(Meter_ID),
@@ -58,7 +58,7 @@ CREATE TABLE Payment (
     Processed_By INTEGER,
     Payment_Date DATE NOT NULL,
     Amount_Paid DECIMAL(10, 2) NOT NULL CHECK (Amount_Paid > 0),
-    Payment_Method VARCHAR(50) NOT NULL CHECK (Payment_Method IN ('Credit Card', 'Bank Transfer', 'Cash', 'Check', 'Online Payment')),
+    Payment_Method VARCHAR(50) NOT NULL CHECK (Payment_Method IN ('Credit Card', 'Bank Transfer', 'Cash', 'Check', 'Online Portal')),
     Payment_Status VARCHAR(20) NOT NULL DEFAULT 'Completed' CHECK (Payment_Status IN ('Pending', 'Completed', 'Failed', 'Refunded')),
     FOREIGN KEY (Bill_ID) REFERENCES Billing(Bill_ID) ON DELETE CASCADE,
     FOREIGN KEY (Processed_By) REFERENCES users(id) ON DELETE SET NULL  -- Reference to the user who processed the payment
@@ -75,6 +75,22 @@ CREATE INDEX idx_billing_paid ON Billing(Paid_Status);
 CREATE INDEX idx_payment_date ON Payment(Payment_Date);
 CREATE INDEX idx_payment_bill ON Payment(Bill_ID);
 
+-- Create trigger function to automatically calculate Amount_Due in Billing table
+CREATE OR REPLACE FUNCTION calculate_billing_amount_due()
+RETURNS TRIGGER AS $$
+BEGIN
+	NEW.Total_Unit = NEW.Current_Reading - NEW.Previous_Reading;
+    NEW.Amount_Due = NEW.Total_Unit * NEW.Rate_Applied;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Create trigger to automatically calculate billing amount due
+CREATE TRIGGER trg_billing_calculate_amount_due
+BEFORE INSERT OR UPDATE ON Billing
+FOR EACH ROW
+EXECUTE FUNCTION calculate_billing_amount_due();
+
 -- Create trigger function to update Paid_Status in Billing table when a payment is made
 CREATE OR REPLACE FUNCTION update_billing_paid_status()
 RETURNS TRIGGER AS $$
@@ -85,7 +101,7 @@ BEGIN
     -- Calculate total payments for this bill
     SELECT COALESCE(SUM(Amount_Paid), 0) INTO total_paid
     FROM Payment
-    WHERE Bill_ID = NEW.Bill_ID AND Payment_Status = 'completed';
+    WHERE Bill_ID = NEW.Bill_ID AND Payment_Status = 'Completed';
     
     -- Get the bill amount
     SELECT Amount_Due INTO bill_amount
@@ -159,11 +175,12 @@ ORDER BY
 -- Password for 'admin' is 'root'
 -- Bcrypt hash for 'root' (cost 10): $2a$10$nAIL5przC.RemyJ2CDmWKetjj1LnM64dwgtxj6SJ/kHlncKpihk6K
 INSERT INTO users (id, username, password_hash, email, permission) VALUES
-(1, 'admin', '$2a$10$nAIL5przC.RemyJ2CDmWKetjj1LnM64dwgtxj6SJ/kHlncKpihk6K', 'admin@example.com', 'administrator');
+(0, 'system', '$2a$10$nAIL5przC.RemyJ2CDmWKetjj1LnM64dwgtxj6SJ/kHlncKpihk6K', 'system@ebill.com', 'administrator'),
+(1, 'admin', '$2a$10$nAIL5przC.RemyJ2CDmWKetjj1LnM64dwgtxj6SJ/kHlncKpihk6K', 'admin@ebill.com', 'administrator');
 
 INSERT INTO Customer (Customer_ID, Name, Address, Email, Phone_Number, Registration_Date) VALUES
-(1, 'Aerith', '123 Maple Street', 'aerith@example.com', '123-456-7890', '2023-01-01'),
-(2, 'Browser', '456 Oak Avenue', 'koopa@example.com', '987-654-3210', '2023-01-21'),
+(1, 'Aerith', '123 Maple Street', 'aerith@gmail.com', '123-456-7890', '2023-01-01'),
+(2, 'Browser', '456 Oak Avenue', 'koopa@gmail.com', '987-654-3210', '2023-01-21'),
 (3, 'Charles Carvin', '789 Pallet City', 'charles@gmail.com', '023-023-2332', '2023-02-01');
 
 INSERT INTO Meter (Meter_ID, Customer_ID, Meter_Number, Meter_Type, Installation_Date, Active_Status) VALUES
@@ -171,14 +188,15 @@ INSERT INTO Meter (Meter_ID, Customer_ID, Meter_Number, Meter_Type, Installation
 (102, 2, 'MTR67890', 'Standard', '2023-03-22', TRUE),
 (103, 3, 'MTR11121', 'Standard', '2023-05-30', FALSE);
 
-INSERT INTO Billing (Bill_ID, Customer_ID, Meter_ID, Billing_Date, Due_Date, Previous_Reading, Current_Reading, Rate_Applied, Amount_Due, Paid_Status) VALUES
-(1001, 1, 101, '2024-04-01', '2024-04-15', 5000.00, 5120.50, 0.50, 60.25, FALSE),
-(1002, 2, 102, '2024-04-01', '2024-04-15', 3000.00, 3150.00, 0.50, 75.00, TRUE),
-(1003, 3, 103, '2024-04-01', '2024-04-15', 1200.00, 1320.50, 0.50, 60.25, TRUE);
+INSERT INTO Billing (Bill_ID, Customer_ID, Meter_ID, Billing_Date, Due_Date, Previous_Reading, Current_Reading, Rate_Applied, Paid_Status) VALUES
+(1001, 1, 101, '2024-04-01', '2024-04-15', 5000.00, 5120.50, 0.50, FALSE),
+(1002, 2, 102, '2024-04-01', '2024-04-15', 3000.00, 3150.00, 0.50, FALSE),
+(1003, 3, 103, '2024-04-01', '2024-04-15', 1200.00, 1320.50, 0.50, FALSE),
+(1004, 2, 102, '2024-04-01', '2024-04-15', 2000.00, 4150.00, 0.50, FALSE);
 
-INSERT INTO Payment (Payment_ID, Bill_ID, Processed_By, Payment_Date, Amount_Paid, Payment_Method, Payment_Status) VALUES
-(5001, 1002, 1, '2024-04-10', 75.00, 'Credit Card', 'Completed'),
-(5002, 1001, 1, '2024-04-10', 60.25, 'Check', 'Completed'),
-(5003, 1003, 1, '2024-04-10', 60.25, 'Credit Card', 'Completed');
+--INSERT INTO Payment (Payment_ID, Bill_ID, Processed_By, Payment_Date, Amount_Paid, Payment_Method, Payment_Status) VALUES
+--(5001, 1002, 1, '2024-04-10', 75.00, 'Credit Card', 'Pending'),
+--(5002, 1001, 1, '2024-04-10', 60.25, 'Check', 'Pending'),
+--(5003, 1003, 1, '2024-04-10', 60.25, 'Credit Card', 'Pending');
 
-SELECT * FROM Customer;
+-- SELECT * FROM Billing;

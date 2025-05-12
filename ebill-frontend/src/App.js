@@ -8,6 +8,7 @@ import CustomerList from './features/customers/CustomerList';
 import MeterList from './features/meters/MeterList';
 import BillingList from './features/billing/BillingList';
 import PaymentList from './features/payments/PaymentList';
+import CustomerPaymentView from './features/customer_portal/CustomerPaymentView';
 import './App.css'; // Optional: for basic styling
 
 function App() {
@@ -44,18 +45,23 @@ function App() {
                 <Link to="/meters">Meters</Link>
                 <Link to="/billing">Billing</Link>
                 <Link to="/payments">Payments</Link>
+                <Link to="/customer-payments">Customer Portal</Link>
               </>
             )}
             {auth ? (
               <button onClick={handleLogout} className="btn-logout">Logout ({auth.username || 'User'})</button>
             ) : (
-              <Link to="/login">Login</Link>
+              <>
+                <Link to="/customer-payments" className="btn-primary">View My Bills</Link>
+                <Link to="/login">Admin Login</Link>
+              </>
             )}
           </nav>
         </header>
         <main>
           <Routes>
             <Route path="/login" element={<LoginPage setAuth={setAuth} />} />
+            <Route path="/customer-payments" element={<CustomerPaymentView />} /> {/* Public route for customers */}
             <Route element={<ProtectedRoute auth={auth} />}>
               <Route path="/users" element={<UserList />} />
               <Route path="/customers" element={<CustomerList />} />
