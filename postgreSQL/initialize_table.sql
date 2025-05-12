@@ -1,8 +1,8 @@
-DROP TABLE IF EXISTS users;
-DROP TABLE IF EXISTS Payment;
-DROP TABLE IF EXISTS Billing;
-DROP TABLE IF EXISTS Meter;
-DROP TABLE IF EXISTS Customer;
+DROP TABLE IF EXISTS users CASCADE;
+DROP TABLE IF EXISTS Payment CASCADE;
+DROP TABLE IF EXISTS Billing CASCADE;
+DROP TABLE IF EXISTS Meter CASCADE;
+DROP TABLE IF EXISTS Customer CASCADE;
 
 --Create users table with constraints
 CREATE TABLE users (
@@ -10,8 +10,7 @@ CREATE TABLE users (
   username VARCHAR(50) NOT NULL UNIQUE,
   password_hash VARCHAR(255) NOT NULL,
   email VARCHAR(100) NOT NULL UNIQUE CHECK (email ~* '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$'),
-  permission VARCHAR(50) NOT NULL CHECK (permission IN ('administrator','operator','customer','viewer')),
-  Active_Status BOOLEAN NOT NULL DEFAULT TRUE
+  permission VARCHAR(50) NOT NULL CHECK (permission IN ('administrator','operator','customer','viewer'))
 );
 
 --Create Customer table with constraints
@@ -21,10 +20,7 @@ CREATE TABLE Customer (
     Address VARCHAR (255) NOT NULL,
     Email VARCHAR (100) NOT NULL UNIQUE CHECK (email ~* '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$'),
     Phone_Number VARCHAR(15) CHECK (Phone_Number ~ '^\d{3}-\d{3}-\d{4}$'),
-    Registration_Date DATE NOT NULL DEFAULT CURRENT_DATE,
-    User_ID INTEGER UNIQUE,
-    Active_Status BOOLEAN NOT NULL DEFAULT TRUE,
-    FOREIGN KEY (User_ID) REFERENCES users(id) ON DELETE SET NULL
+    Registration_Date DATE NOT NULL DEFAULT CURRENT_DATE
 );
 
 --Create Meter table with constraints
@@ -32,6 +28,7 @@ CREATE TABLE Meter(
     Meter_ID SERIAL PRIMARY KEY,
     Customer_ID INTEGER NOT NULL,
     Meter_Number VARCHAR (50) NOT NULL UNIQUE,
+    Meter_Type VARCHAR (50) NOT NULL DEFAULT 'Standard' CHECK (Meter_Type IN ('Standard', 'Smart', 'Digital', 'Prepayment')),
     Installation_Date Date NOT NULL,
     Active_Status BOOLEAN NOT NULL DEFAULT TRUE,
     FOREIGN KEY (Customer_ID) REFERENCES Customer(Customer_ID) ON DELETE CASCADE
@@ -62,8 +59,7 @@ CREATE TABLE Payment (
     Payment_Date DATE NOT NULL,
     Amount_Paid DECIMAL(10, 2) NOT NULL CHECK (Amount_Paid > 0),
     Payment_Method VARCHAR(50) NOT NULL CHECK (Payment_Method IN ('Credit Card', 'Bank Transfer', 'Cash', 'Check', 'Online Payment')),
-    Transaction_ID VARCHAR(100) UNIQUE,
-    Payment_Status VARCHAR(20) NOT NULL DEFAULT 'completed' CHECK (Payment_Status IN ('pending', 'completed', 'failed', 'refunded')),
+    Payment_Status VARCHAR(20) NOT NULL DEFAULT 'Completed' CHECK (Payment_Status IN ('Pending', 'Completed', 'Failed', 'Refunded')),
     FOREIGN KEY (Bill_ID) REFERENCES Billing(Bill_ID) ON DELETE CASCADE,
     FOREIGN KEY (Processed_By) REFERENCES users(id) ON DELETE SET NULL  -- Reference to the user who processed the payment
 );
@@ -162,27 +158,27 @@ ORDER BY
 -- Sample user (replace with your actual hashed password generation)
 -- Password for 'admin' is 'root'
 -- Bcrypt hash for 'root' (cost 10): $2a$10$nAIL5przC.RemyJ2CDmWKetjj1LnM64dwgtxj6SJ/kHlncKpihk6K
-INSERT INTO users (username, password_hash, email, permission) VALUES
-('admin', '$2a$10$nAIL5przC.RemyJ2CDmWKetjj1LnM64dwgtxj6SJ/kHlncKpihk6K', 'admin@example.com', 'administrator');
+INSERT INTO users (id, username, password_hash, email, permission) VALUES
+(1, 'admin', '$2a$10$nAIL5przC.RemyJ2CDmWKetjj1LnM64dwgtxj6SJ/kHlncKpihk6K', 'admin@example.com', 'administrator');
 
-INSERT INTO Customer (Customer_ID, Name, Address, Email, Phone_Number, Registration_Date, Active_Status) VALUES
-(1, 'Aerith', '123 Maple Street', 'aerith@example.com', '123-456-7890', '2023-01-01', TRUE),
-(2, 'Browser', '456 Oak Avenue', 'koopa@example.com', '987-654-3210', '2023-01-21', TRUE),
-(3, 'Charles Carvin', '789 Pallet City', 'charles@gmail.com', '023-023-2332', '2023-02-01', TRUE);
+INSERT INTO Customer (Customer_ID, Name, Address, Email, Phone_Number, Registration_Date) VALUES
+(1, 'Aerith', '123 Maple Street', 'aerith@example.com', '123-456-7890', '2023-01-01'),
+(2, 'Browser', '456 Oak Avenue', 'koopa@example.com', '987-654-3210', '2023-01-21'),
+(3, 'Charles Carvin', '789 Pallet City', 'charles@gmail.com', '023-023-2332', '2023-02-01');
 
 INSERT INTO Meter (Meter_ID, Customer_ID, Meter_Number, Meter_Type, Installation_Date, Active_Status) VALUES
 (101, 1, 'MTR12345', 'Standard', '2023-01-15', TRUE),
-(102, 2, 'MTR67890', 'Standard','2023-03-22', TRUE),
-(103, 3, 'MTR11121', 'Standard','2023-05-30', FALSE);
+(102, 2, 'MTR67890', 'Standard', '2023-03-22', TRUE),
+(103, 3, 'MTR11121', 'Standard', '2023-05-30', FALSE);
 
 INSERT INTO Billing (Bill_ID, Customer_ID, Meter_ID, Billing_Date, Due_Date, Previous_Reading, Current_Reading, Rate_Applied, Amount_Due, Paid_Status) VALUES
 (1001, 1, 101, '2024-04-01', '2024-04-15', 5000.00, 5120.50, 0.50, 60.25, FALSE),
 (1002, 2, 102, '2024-04-01', '2024-04-15', 3000.00, 3150.00, 0.50, 75.00, TRUE),
 (1003, 3, 103, '2024-04-01', '2024-04-15', 1200.00, 1320.50, 0.50, 60.25, TRUE);
 
-INSERT INTO Payment (Payment_ID, Bill_ID, Payment_Date, Amount_Paid, Payment_Method, Transaction_ID) VALUES
-(5001, 1002, '2024-04-10', 75.00, 'Credit Card', 'TXN123456'),
-(5002, 1001, '2024-04-10', 60.25, 'Check', 'TXN789101'),
-(5003, 1003, '2024-04-10', 60.25, 'Credit Card', 'TXN121314');
+INSERT INTO Payment (Payment_ID, Bill_ID, Processed_By, Payment_Date, Amount_Paid, Payment_Method, Payment_Status) VALUES
+(5001, 1002, 1, '2024-04-10', 75.00, 'Credit Card', 'Completed'),
+(5002, 1001, 1, '2024-04-10', 60.25, 'Check', 'Completed'),
+(5003, 1003, 1, '2024-04-10', 60.25, 'Credit Card', 'Completed');
 
 SELECT * FROM Customer;

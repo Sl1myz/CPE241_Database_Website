@@ -8,8 +8,8 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"strings"
 	"strconv" // For converting string IDs from path params to int
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -29,18 +29,19 @@ var jwtKey = []byte("idkwhattosetthiskeyto")
 type User struct {
 	ID           int    `json:"id"`
 	Username     string `json:"username"`
-	PasswordHash string `json:"-"` // Not exposed in JSON
+	PasswordHash string `json:"-"`
 	Email        string `json:"email"`
 	Permission   string `json:"permission"`
 }
 
 // Customer struct
 type Customer struct {
-	CustomerID  int    `json:"Customer_ID"`
-	Name        string `json:"Name"`
-	Address     string `json:"Address"`
-	Email       string `json:"Email"`
-	PhoneNumber string `json:"Phone_Number"`
+	CustomerID       int    `json:"Customer_ID"`
+	Name             string `json:"Name"`
+	Address          string `json:"Address"`
+	Email            string `json:"Email"`
+	PhoneNumber      string `json:"Phone_Number"`
+	RegistrationDate string `json:"Registration_Date"`
 }
 
 // Meter struct
@@ -54,23 +55,29 @@ type Meter struct {
 
 // Billing struct
 type Billing struct {
-	BillID      int     `json:"Bill_ID"`
-	CustomerID  int     `json:"Customer_ID"`  // Foreign Key
-	MeterID     int     `json:"Meter_ID"`     // Foreign Key
-	BillingDate string  `json:"Billing_Date"` // Store as YYYY-MM-DD string, or use time.Time
-	DueDate     string  `json:"Due_Date"`     // Store as YYYY-MM-DD string, or use time.Time
-	TotalUnit   float64 `json:"Total_Unit"`   // Corresponds to DECIMAL(10, 2)
-	AmountDue   float64 `json:"Amount_Due"`   // Corresponds to DECIMAL(10, 2)
-	PaidStatus  bool    `json:"Paid_Status"`
+	BillID          int     `json:"Bill_ID"`
+	CustomerID      int     `json:"Customer_ID"` // Foreign Key
+	Customer_Name   string  `json:"Customer_Name"`
+	MeterID         int     `json:"Meter_ID"`     // Foreign Key
+	BillingDate     string  `json:"Billing_Date"` // Store as YYYY-MM-DD string, or use time.Time
+	DueDate         string  `json:"Due_Date"`     // Store as YYYY-MM-DD string, or use time.Time
+	ReadingPrevious float64 `json:"Previous_Reading"`
+	ReadingCurrent  float64 `json:"Current_Reading"`
+	RateApplied     float64 `json:"Rate_Applied"`
+	TotalUnit       float64 `json:"Total_Unit"` // Corresponds to DECIMAL(10, 2)
+	AmountDue       float64 `json:"Amount_Due"` // Corresponds to DECIMAL(10, 2)
+	PaidStatus      bool    `json:"Paid_Status"`
 }
 
 // Payment struct
 type Payment struct {
 	PaymentID     int     `json:"Payment_ID"`
-	BillID        int     `json:"Bill_ID"`      // Foreign Key
+	BillID        int     `json:"Bill_ID"` // Foreign Key
+	ProcessedBy   int     `json:"Processed_By"`
 	PaymentDate   string  `json:"Payment_Date"` // Store as YYYY-MM-DD string, or use time.Time
 	AmountPaid    float64 `json:"Amount_Paid"`  // Corresponds to DECIMAL(10, 2)
 	PaymentMethod string  `json:"Payment_Method"`
+	PaymentStatus string  `json:"Payment_Status"`
 }
 
 // Credentials struct for login request
@@ -102,11 +109,21 @@ func init() {
 	dbPassword := os.Getenv("DB_PASSWORD")
 	dbName := os.Getenv("DB_NAME")
 
-	if dbHost == "" {	dbHost = "localhost" }
-	if dbPort == "" { dbPort = "5432" }
-	if dbUser == "" { dbUser = "postgres" }
-	if dbPassword == "" { dbPassword = "root" }
-	if dbName == "" { dbName = "ebill" }
+	if dbHost == "" {
+		dbHost = "localhost"
+	}
+	if dbPort == "" {
+		dbPort = "5432"
+	}
+	if dbUser == "" {
+		dbUser = "postgres"
+	}
+	if dbPassword == "" {
+		dbPassword = "root"
+	}
+	if dbName == "" {
+		dbName = "ebill"
+	}
 
 	connStr := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
 		dbHost, dbPort, dbUser, dbPassword, dbName)
@@ -138,7 +155,6 @@ func respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
 	w.WriteHeader(code)
 	json.NewEncoder(w).Encode(payload)
 }
-
 
 func enableCORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -266,17 +282,16 @@ func getUsers(w http.ResponseWriter, r *http.Request) {
 // --- Customer Handlers ---
 func getCustomers(w http.ResponseWriter, r *http.Request) {
 	log.Println("API: getCustomers called")
-	rows, err := db.Query(`SELECT "customer_id", "name", "address", "email", "phone_number" FROM "customer"`)
+	rows, err := db.Query(`SELECT "customer_id", "name", "address", "email", "phone_number", "registration_date" FROM "customer" ORDER BY customer_id ASC`)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Failed to retrieve customers: "+err.Error())
 		return
 	}
 	defer rows.Close()
-
 	customers := []Customer{}
 	for rows.Next() {
 		var c Customer
-		if err := rows.Scan(&c.CustomerID, &c.Name, &c.Address, &c.Email, &c.PhoneNumber); err != nil {
+		if err := rows.Scan(&c.CustomerID, &c.Name, &c.Address, &c.Email, &c.PhoneNumber, &c.RegistrationDate); err != nil {
 			respondWithError(w, http.StatusInternalServerError, "Error scanning customer data: "+err.Error())
 			return
 		}
@@ -298,8 +313,8 @@ func createCustomer(w http.ResponseWriter, r *http.Request) {
 	// ID will be auto-generated by the database
 	// We expect other fields to be validated as necessary (e.g., Name not empty)
 
-	sqlStatement := `INSERT INTO "customer" ("name", "address", "email", "phone_number") VALUES ($1, $2, $3, $4) RETURNING "customer_id"`
-	err := db.QueryRow(sqlStatement, c.Name, c.Address, c.Email, c.PhoneNumber).Scan(&c.CustomerID)
+	sqlStatement := `INSERT INTO "customer" ("name", "address", "email", "phone_number", "registration_date") VALUES ($1, $2, $3, $4, $5) RETURNING "customer_id"`
+	err := db.QueryRow(sqlStatement, c.Name, c.Address, c.Email, c.PhoneNumber, c.RegistrationDate).Scan(&c.CustomerID)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Failed to create customer: "+err.Error())
 		return
@@ -321,8 +336,8 @@ func getCustomerByID(w http.ResponseWriter, r *http.Request) {
 	log.Printf("API: getCustomerByID called for ID: %d", id)
 
 	var c Customer
-	sqlStatement := `SELECT "customer_id", "name", "address", "email", "phone_number" FROM "customer" WHERE "customer_id" = $1`
-	err = db.QueryRow(sqlStatement, id).Scan(&c.CustomerID, &c.Name, &c.Address, &c.Email, &c.PhoneNumber)
+	sqlStatement := `SELECT "customer_id", "name", "address", "email", "phone_number", "registration_date" FROM "customer" WHERE "customer_id" = $1`
+	err = db.QueryRow(sqlStatement, id).Scan(&c.CustomerID, &c.Name, &c.Address, &c.Email, &c.PhoneNumber, &c.RegistrationDate)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			respondWithError(w, http.StatusNotFound, "Customer not found")
@@ -353,8 +368,8 @@ func updateCustomer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sqlStatement := `UPDATE "customer" SET "name" = $1, "address" = $2, "email" = $3, "phone_number" = $4 WHERE "customer_id" = $5`
-	res, err := db.Exec(sqlStatement, c.Name, c.Address, c.Email, c.PhoneNumber, id)
+	sqlStatement := `UPDATE "customer" SET "name" = $1, "address" = $2, "email" = $3, "phone_number" = $4, "registration_date" = $5 WHERE "customer_id" = $6`
+	res, err := db.Exec(sqlStatement, c.Name, c.Address, c.Email, c.PhoneNumber, c.RegistrationDate, id)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Failed to update customer: "+err.Error())
 		return
@@ -406,7 +421,7 @@ func deleteCustomer(w http.ResponseWriter, r *http.Request) {
 // --- Meter Handlers ---
 func getMeters(w http.ResponseWriter, r *http.Request) {
 	log.Println("API: getMeters called")
-	rows, err := db.Query(`SELECT "meter_id", "customer_id", "meter_number", "installation_date", "active_status" FROM "meter"`)
+	rows, err := db.Query(`SELECT "meter_id", "customer_id", "meter_number", "installation_date", "active_status" FROM "meter" ORDER BY meter_id ASC`)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Failed to retrieve meters: "+err.Error())
 		return
@@ -523,7 +538,9 @@ func deleteMeter(w http.ResponseWriter, r *http.Request) {
 // --- Billing Handlers ---
 func getBillings(w http.ResponseWriter, r *http.Request) {
 	log.Println("API: getBillings called")
-	rows, err := db.Query(`SELECT "bill_id", "customer_id", "meter_id", "billing_date", "due_date", "total_unit", "amount_due", "paid_status" FROM "billing"`)
+	rows, err := db.Query(`SELECT c.Name, b.bill_id, b.customer_id, b.meter_id, b.billing_date, b.due_date, 
+	                        b.previous_reading, b.current_reading, b.rate_applied, b.total_unit, b.amount_due, b.paid_status FROM billing b, customer c, meter m
+	                        WHERE b.customer_id = c.customer_id AND b.meter_id = m.meter_id ORDER BY bill_id ASC`)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Failed to retrieve bills: "+err.Error())
 		return
@@ -532,7 +549,8 @@ func getBillings(w http.ResponseWriter, r *http.Request) {
 	billings := []Billing{}
 	for rows.Next() {
 		var b Billing
-		if err := rows.Scan(&b.BillID, &b.CustomerID, &b.MeterID, &b.BillingDate, &b.DueDate, &b.TotalUnit, &b.AmountDue, &b.PaidStatus); err != nil {
+		if err := rows.Scan(&b.Customer_Name, &b.BillID, &b.CustomerID, &b.MeterID, &b.BillingDate, &b.DueDate,
+			&b.ReadingPrevious, &b.ReadingCurrent, &b.RateApplied, &b.TotalUnit, &b.AmountDue, &b.PaidStatus); err != nil {
 			respondWithError(w, http.StatusInternalServerError, "Error scanning bill data: "+err.Error())
 			return
 		}
@@ -560,8 +578,12 @@ func createBilling(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Bill_ID will be auto-generated
-	sqlStatement := `INSERT INTO "billing" ("customer_id", "meter_id", "billing_date", "due_date", "total_unit", "amount_due", "paid_status") VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING "bill_id"`
-	err := db.QueryRow(sqlStatement, b.CustomerID, b.MeterID, b.BillingDate, b.DueDate, b.TotalUnit, b.AmountDue, b.PaidStatus).Scan(&b.BillID)
+	// Total_Unit is generated by the database, so we don't insert it directly. We can return it.
+	sqlStatement := `INSERT INTO "billing" ("customer_id", "meter_id", "billing_date", "due_date", 
+	                 "previous_reading", "current_reading", "rate_applied", "amount_due", "paid_status") 
+	                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING "bill_id", "total_unit"`
+	err := db.QueryRow(sqlStatement, b.CustomerID, b.MeterID, b.BillingDate, b.DueDate,
+		b.ReadingPrevious, b.ReadingCurrent, b.RateApplied, b.AmountDue, b.PaidStatus).Scan(&b.BillID, &b.TotalUnit)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Failed to create bill: "+err.Error())
 		return
@@ -570,47 +592,87 @@ func createBilling(w http.ResponseWriter, r *http.Request) {
 }
 func getBillingByID(w http.ResponseWriter, r *http.Request) {
 	log.Println("API: getBillingByID called")
-	vars := mux.Vars(r); idStr, _ := vars["id"]; id, err := strconv.Atoi(idStr)
-	if err != nil { respondWithError(w, http.StatusBadRequest, "Invalid Bill ID"); return }
-	var b Billing
-	sqlStatement := `SELECT "bill_id", "customer_id", "meter_id", "billing_date", "due_date", "total_unit", "amount_due", "paid_status" FROM "billing" WHERE "bill_id" = $1`
-	err = db.QueryRow(sqlStatement, id).Scan(&b.BillID, &b.CustomerID, &b.MeterID, &b.BillingDate, &b.DueDate, &b.TotalUnit, &b.AmountDue, &b.PaidStatus)
+	vars := mux.Vars(r)
+	idStr, _ := vars["id"]
+	id, err := strconv.Atoi(idStr)
 	if err != nil {
-		if err == sql.ErrNoRows { respondWithError(w, http.StatusNotFound, "Bill not found") } else { respondWithError(w, http.StatusInternalServerError, "Failed to retrieve bill: "+err.Error())}
+		respondWithError(w, http.StatusBadRequest, "Invalid Bill ID")
+		return
+	}
+	var b Billing
+	sqlStatement := `SELECT "bill_id", "customer_id", "meter_id", "billing_date", "due_date", 
+	                 "previous_reading", "current_reading", "rate_applied", "total_unit", "amount_due", "paid_status" 
+									 FROM "billing" WHERE "bill_id" = $1`
+	err = db.QueryRow(sqlStatement, id).Scan(&b.BillID, &b.CustomerID, &b.MeterID, &b.BillingDate, &b.DueDate,
+		&b.ReadingPrevious, &b.ReadingCurrent, &b.RateApplied, &b.TotalUnit, &b.AmountDue, &b.PaidStatus)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			respondWithError(w, http.StatusNotFound, "Bill not found")
+		} else {
+			respondWithError(w, http.StatusInternalServerError, "Failed to retrieve bill: "+err.Error())
+		}
 		return
 	}
 	respondWithJSON(w, http.StatusOK, b)
 }
 func updateBilling(w http.ResponseWriter, r *http.Request) {
 	log.Println("API: updateBilling called")
-	vars := mux.Vars(r); idStr, _ := vars["id"]; id, err := strconv.Atoi(idStr)
-	if err != nil { respondWithError(w, http.StatusBadRequest, "Invalid Bill ID"); return }
+	vars := mux.Vars(r)
+	idStr, _ := vars["id"]
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid Bill ID")
+		return
+	}
 	var b Billing
-	if err := json.NewDecoder(r.Body).Decode(&b); err != nil { respondWithError(w, http.StatusBadRequest, "Invalid request body: "+err.Error()); return }
-	sqlStatement := `UPDATE "billing" SET "customer_id"=$1, "meter_id"=$2, "billing_date"=$3, "due_date"=$4, "total_unit"=$5, "amount_due"=$6, "paid_status"=$7 WHERE "bill_id"=$8`
-	res, err := db.Exec(sqlStatement, b.CustomerID, b.MeterID, b.BillingDate, b.DueDate, b.TotalUnit, b.AmountDue, b.PaidStatus, id)
-	if err != nil { respondWithError(w, http.StatusInternalServerError, "Failed to update bill: "+err.Error()); return }
-	count, _ := res.RowsAffected()
-	if count == 0 { respondWithError(w, http.StatusNotFound, "Bill not found or no changes made"); return }
+	if err := json.NewDecoder(r.Body).Decode(&b); err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid request body: "+err.Error())
+		return
+	}
+	// Total_Unit is generated, so not included in SET. We can return it.
+	sqlStatement := `UPDATE "billing" SET "customer_id"=$1, "meter_id"=$2, "billing_date"=$3, "due_date"=$4, 
+	                 "previous_reading"=$5, "current_reading"=$6, "rate_applied"=$7, "amount_due"=$8, "paid_status"=$9 
+									 WHERE "bill_id"=$10 RETURNING "total_unit"`
+	err = db.QueryRow(sqlStatement, b.CustomerID, b.MeterID, b.BillingDate, b.DueDate,
+		b.ReadingPrevious, b.ReadingCurrent, b.RateApplied, b.AmountDue, b.PaidStatus, id).Scan(&b.TotalUnit)
+	if err != nil {
+		if err == sql.ErrNoRows { // If QueryRow finds no rows, Scan returns sql.ErrNoRows
+			respondWithError(w, http.StatusNotFound, "Bill not found or no changes made")
+			return
+		}
+		respondWithError(w, http.StatusInternalServerError, "Failed to update bill: "+err.Error())
+		return
+	}
 	b.BillID = id
 	respondWithJSON(w, http.StatusOK, b)
 }
 func deleteBilling(w http.ResponseWriter, r *http.Request) {
 	log.Println("API: deleteBilling called")
-	vars := mux.Vars(r); idStr, _ := vars["id"]; id, err := strconv.Atoi(idStr)
-	if err != nil { respondWithError(w, http.StatusBadRequest, "Invalid Bill ID"); return }
+	vars := mux.Vars(r)
+	idStr, _ := vars["id"]
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid Bill ID")
+		return
+	}
 	sqlStatement := `DELETE FROM "billing" WHERE "bill_id" = $1`
 	res, err := db.Exec(sqlStatement, id)
-	if err != nil { respondWithError(w, http.StatusInternalServerError, "Failed to delete bill: "+err.Error()); return }
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to delete bill: "+err.Error())
+		return
+	}
 	count, _ := res.RowsAffected()
-	if count == 0 { respondWithError(w, http.StatusNotFound, "Bill not found"); return }
+	if count == 0 {
+		respondWithError(w, http.StatusNotFound, "Bill not found")
+		return
+	}
 	respondWithJSON(w, http.StatusOK, map[string]string{"message": "Bill deleted successfully"})
 }
 
 // --- Payment Handlers ---
 func getPayments(w http.ResponseWriter, r *http.Request) {
 	log.Println("API: getPayments called")
-	rows, err := db.Query(`SELECT "payment_id", "bill_id", "payment_date", "amount_paid", "payment_method" FROM "payment"`)
+	rows, err := db.Query(`SELECT "payment_id", "bill_id", "processed_by", "payment_date", "amount_paid", "payment_method", "payment_status" FROM "payment" ORDER BY payment_id ASC`)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Failed to retrieve payments: "+err.Error())
 		return
@@ -619,7 +681,7 @@ func getPayments(w http.ResponseWriter, r *http.Request) {
 	payments := []Payment{}
 	for rows.Next() {
 		var p Payment
-		if err := rows.Scan(&p.PaymentID, &p.BillID, &p.PaymentDate, &p.AmountPaid, &p.PaymentMethod); err != nil {
+		if err := rows.Scan(&p.PaymentID, &p.BillID, &p.ProcessedBy, &p.PaymentDate, &p.AmountPaid, &p.PaymentMethod, &p.PaymentStatus); err != nil {
 			respondWithError(w, http.StatusInternalServerError, "Error scanning payment data: "+err.Error())
 			return
 		}
@@ -643,8 +705,9 @@ func createPayment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Payment_ID will be auto-generated
-	sqlStatement := `INSERT INTO "payment" ("bill_id", "payment_date", "amount_paid", "payment_method") VALUES ($1, $2, $3, $4) RETURNING "payment_id"`
-	err := db.QueryRow(sqlStatement, p.BillID, p.PaymentDate, p.AmountPaid, p.PaymentMethod).Scan(&p.PaymentID)
+	sqlStatement := `INSERT INTO "payment" ("bill_id", "processed_by", "payment_date", "amount_paid", "payment_method", "payment_status") 
+	                 VALUES ($1, $2, $3, $4, $5, $6) RETURNING "payment_id"`
+	err := db.QueryRow(sqlStatement, p.BillID, p.ProcessedBy, p.PaymentDate, p.AmountPaid, p.PaymentMethod, p.PaymentStatus).Scan(&p.PaymentID)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Failed to create payment: "+err.Error())
 		return
@@ -653,43 +716,78 @@ func createPayment(w http.ResponseWriter, r *http.Request) {
 }
 func getPaymentByID(w http.ResponseWriter, r *http.Request) {
 	log.Println("API: getPaymentByID called")
-	vars := mux.Vars(r); idStr, _ := vars["id"]; id, err := strconv.Atoi(idStr)
-	if err != nil { respondWithError(w, http.StatusBadRequest, "Invalid Payment ID"); return }
-	var p Payment
-	sqlStatement := `SELECT "payment_id", "bill_id", "payment_date", "amount_paid", "payment_method" FROM "payment" WHERE "payment_id" = $1`
-	err = db.QueryRow(sqlStatement, id).Scan(&p.PaymentID, &p.BillID, &p.PaymentDate, &p.AmountPaid, &p.PaymentMethod)
+	vars := mux.Vars(r)
+	idStr, _ := vars["id"]
+	id, err := strconv.Atoi(idStr)
 	if err != nil {
-		if err == sql.ErrNoRows { respondWithError(w, http.StatusNotFound, "Payment not found") } else { respondWithError(w, http.StatusInternalServerError, "Failed to retrieve payment: "+err.Error())}
+		respondWithError(w, http.StatusBadRequest, "Invalid Payment ID")
+		return
+	}
+	var p Payment
+	sqlStatement := `SELECT "payment_id", "bill_id", "processed_by", "payment_date", "amount_paid", "payment_method", "payment_status" 
+	                 FROM "payment" WHERE "payment_id" = $1`
+	err = db.QueryRow(sqlStatement, id).Scan(&p.PaymentID, &p.BillID, &p.ProcessedBy, &p.PaymentDate, &p.AmountPaid, &p.PaymentMethod, &p.PaymentStatus)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			respondWithError(w, http.StatusNotFound, "Payment not found")
+		} else {
+			respondWithError(w, http.StatusInternalServerError, "Failed to retrieve payment: "+err.Error())
+		}
 		return
 	}
 	respondWithJSON(w, http.StatusOK, p)
 }
 func updatePayment(w http.ResponseWriter, r *http.Request) {
 	log.Println("API: updatePayment called")
-	vars := mux.Vars(r); idStr, _ := vars["id"]; id, err := strconv.Atoi(idStr)
-	if err != nil { respondWithError(w, http.StatusBadRequest, "Invalid Payment ID"); return }
+	vars := mux.Vars(r)
+	idStr, _ := vars["id"]
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid Payment ID")
+		return
+	}
 	var p Payment
-	if err := json.NewDecoder(r.Body).Decode(&p); err != nil { respondWithError(w, http.StatusBadRequest, "Invalid request body: "+err.Error()); return }
-	sqlStatement := `UPDATE "payment" SET "bill_id"=$1, "payment_date"=$2, "amount_paid"=$3, "payment_method"=$4 WHERE "payment_id"=$5`
-	res, err := db.Exec(sqlStatement, p.BillID, p.PaymentDate, p.AmountPaid, p.PaymentMethod, id)
-	if err != nil { respondWithError(w, http.StatusInternalServerError, "Failed to update payment: "+err.Error()); return }
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid request body: "+err.Error())
+		return
+	}
+	sqlStatement := `UPDATE "payment" SET "bill_id"=$1, "processed_by"=$2, "payment_date"=$3, "amount_paid"=$4, "payment_method"=$5, "payment_status"=$6 
+	                 WHERE "payment_id"=$7`
+	res, err := db.Exec(sqlStatement, p.BillID, p.ProcessedBy, p.PaymentDate, p.AmountPaid, p.PaymentMethod, p.PaymentStatus, id)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to update payment: "+err.Error())
+		return
+	}
 	count, _ := res.RowsAffected()
-	if count == 0 { respondWithError(w, http.StatusNotFound, "Payment not found or no changes made"); return }
+	if count == 0 {
+		respondWithError(w, http.StatusNotFound, "Payment not found or no changes made")
+		return
+	}
 	p.PaymentID = id
 	respondWithJSON(w, http.StatusOK, p)
 }
 func deletePayment(w http.ResponseWriter, r *http.Request) {
 	log.Println("API: deletePayment called")
-	vars := mux.Vars(r); idStr, _ := vars["id"]; id, err := strconv.Atoi(idStr)
-	if err != nil { respondWithError(w, http.StatusBadRequest, "Invalid Payment ID"); return }
+	vars := mux.Vars(r)
+	idStr, _ := vars["id"]
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid Payment ID")
+		return
+	}
 	sqlStatement := `DELETE FROM "payment" WHERE "payment_id" = $1`
 	res, err := db.Exec(sqlStatement, id)
-	if err != nil { respondWithError(w, http.StatusInternalServerError, "Failed to delete payment: "+err.Error()); return }
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to delete payment: "+err.Error())
+		return
+	}
 	count, _ := res.RowsAffected()
-	if count == 0 { respondWithError(w, http.StatusNotFound, "Payment not found"); return }
+	if count == 0 {
+		respondWithError(w, http.StatusNotFound, "Payment not found")
+		return
+	}
 	respondWithJSON(w, http.StatusOK, map[string]string{"message": "Payment deleted successfully"})
 }
-
 
 func main() {
 	envJwtKey := os.Getenv("JWT_SECRET_KEY")

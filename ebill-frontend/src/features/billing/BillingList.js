@@ -87,12 +87,13 @@ function BillingList() {
           <thead>
             <tr>
               <th>Bill ID</th>
-              <th>Cust. ID</th>
+              <th>Customer</th>
               <th>Meter ID</th>
               <th>Billing Date</th>
               <th>Units</th>
-              <th>Amount Due</th>
+              <th>Rate</th>
               <th>Due Date</th>
+              <th>Amount Due</th>
               <th>Paid</th>
               <th>Actions</th>
             </tr>
@@ -101,12 +102,13 @@ function BillingList() {
             {bills.map((bill) => (
               <tr key={bill.Bill_ID}>
                 <td>{bill.Bill_ID}</td>
-                <td>{bill.Customer_ID}</td>
+                <td>{bill.Customer_Name}</td>
                 <td>{bill.Meter_ID}</td>
                 <td>{bill.Billing_Date ? new Date(bill.Billing_Date).toLocaleDateString() : 'N/A'}</td>
-                <td>{bill.Units_Consumed}</td>
-                <td>{bill.Amount_Due}</td>
+                <td>{bill.Total_Unit}</td>
+                <td>x {bill.Rate_Applied}</td>
                 <td>{bill.Due_Date ? new Date(bill.Due_Date).toLocaleDateString() : 'N/A'}</td>
+                <td>{bill.Amount_Due} THB</td>
                 <td>{bill.Paid_Status ? '✅' : '❌'}</td>
                 <td className="actions-cell">
                   <button onClick={() => handleEdit(bill)} className="btn btn-warning btn-sm">Edit</button>

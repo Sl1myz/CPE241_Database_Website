@@ -7,6 +7,7 @@ function CustomerForm({ isOpen, onClose, onSubmit, initialData, isEditMode }) {
     Address: '',
     Email: '',
     Phone_Number: '',
+    Registration_Date: '', // Added for registration date
   });
   const [error, setError] = useState('');
 
@@ -15,6 +16,8 @@ function CustomerForm({ isOpen, onClose, onSubmit, initialData, isEditMode }) {
       setFormData({
         ...initialData,
         Customer_ID: initialData.Customer_ID ? String(initialData.Customer_ID) : '', // For input value
+        // Format date for input type="date" if it exists
+        Registration_Date: initialData.Registration_Date ? new Date(initialData.Registration_Date).toISOString().split('T')[0] : '',
       });
     } else {
       // Reset form for create mode or if initialData is null
@@ -24,6 +27,8 @@ function CustomerForm({ isOpen, onClose, onSubmit, initialData, isEditMode }) {
         Address: '',
         Email: '',
         Phone_Number: '',
+        // Automatically set to today's date for new customers
+        Registration_Date: new Date().toISOString().split('T')[0],
       });
     }
   }, [initialData, isOpen]); // Depend on isOpen to reset form when modal opens for "create"
@@ -42,7 +47,11 @@ function CustomerForm({ isOpen, onClose, onSubmit, initialData, isEditMode }) {
         setError('Name is required.');
         return;
     }
-
+    // Ensure Registration_Date is not an empty string if it's required by backend
+    if (!formData.Registration_Date) {
+        setError('Registration Date is required.');
+        return;
+    }
     try {
       const payload = {
         ...formData,
@@ -108,6 +117,15 @@ function CustomerForm({ isOpen, onClose, onSubmit, initialData, isEditMode }) {
           <div>
             <label>Phone Number:</label>
             <input type="text" name="Phone_Number" value={formData.Phone_Number} onChange={handleChange} />
+          </div>
+          <div>
+            <label>Registration Date:</label>
+            <input
+              type="date"
+              name="Registration_Date"
+              value={formData.Registration_Date}
+              onChange={handleChange}
+            />
           </div>
           <button type="submit" className="btn btn-primary">{isEditMode ? 'Save Changes' : 'Add Customer'}</button>
           <button type="button" onClick={onClose} className="btn btn-light">Cancel</button>

@@ -91,6 +91,7 @@ function PaymentList() {
               <th>Payment Date</th>
               <th>Amount Paid</th>
               <th>Method</th>
+              <th>Status</th>
               <th>Actions</th>
             </tr>
           </thead>
@@ -102,6 +103,7 @@ function PaymentList() {
                 <td>{payment.Payment_Date ? new Date(payment.Payment_Date).toLocaleDateString() : 'N/A'}</td>
                 <td>{payment.Amount_Paid}</td>
                 <td>{payment.Payment_Method}</td>
+                <td>{payment.Payment_Status == 'Completed' ? '✅' : payment.Payment_Status}</td>
                 <td className="actions-cell">
                   <button onClick={() => handleEdit(payment)} className="btn btn-warning btn-sm">Edit</button>
                   <button onClick={() => handleDelete(payment.Payment_ID)} className="btn btn-danger btn-sm">Delete</button>

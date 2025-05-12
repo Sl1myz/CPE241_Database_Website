@@ -6,7 +6,9 @@ function BillingForm({ isOpen, onClose, onSubmit, initialData, isEditMode }) {
     Customer_ID: '',
     Meter_ID: '',
     Billing_Date: '',
-    Total_Unit: '', 
+    ReadingPrevious: '',
+    ReadingCurrent: '',
+    RateApplied: '',
     Amount_Due: '',
     Due_Date: '',
     Paid_Status: false, 
@@ -20,15 +22,22 @@ function BillingForm({ isOpen, onClose, onSubmit, initialData, isEditMode }) {
         Bill_ID: initialData.Bill_ID ? String(initialData.Bill_ID) : '',
         Customer_ID: initialData.Customer_ID ? String(initialData.Customer_ID) : '',
         Meter_ID: initialData.Meter_ID ? String(initialData.Meter_ID) : '',
-        Total_Unit: initialData.Total_Unit ? String(initialData.Total_Unit) : '',
+        ReadingPrevious: initialData.ReadingPrevious ? String(initialData.ReadingPrevious) : '',
+        ReadingCurrent: initialData.ReadingCurrent ? String(initialData.ReadingCurrent) : '',
+        RateApplied: initialData.RateApplied ? String(initialData.RateApplied) : '',
+        // Total_Unit will be populated from initialData if present, but not directly editable for submission
         Amount_Due: initialData.Amount_Due ? String(initialData.Amount_Due) : '',
         Billing_Date: initialData.Billing_Date ? new Date(initialData.Billing_Date).toISOString().split('T')[0] : '',
         Due_Date: initialData.Due_Date ? new Date(initialData.Due_Date).toISOString().split('T')[0] : '',
         // Paid_Status is already boolean
       });
     } else {
+      // For new bills, set Billing_Date to today
       setFormData({
-        Bill_ID: '', Customer_ID: '', Meter_ID: '', Billing_Date: '', Due_Date: '', Total_Unit: '', Amount_Due: '', Paid_Status: false,
+        Bill_ID: '', Customer_ID: '', Meter_ID: '', 
+        Billing_Date: new Date().toISOString().split('T')[0], // Default to today
+        ReadingPrevious: '', ReadingCurrent: '', RateApplied: '',
+        Amount_Due: '', Due_Date: '', Paid_Status: false,
       });
     }
   }, [initialData, isOpen]);
@@ -49,17 +58,24 @@ function BillingForm({ isOpen, onClose, onSubmit, initialData, isEditMode }) {
     if (!formData.Customer_ID) { setError('Customer ID is required.'); return; }
     if (!formData.Meter_ID) { setError('Meter ID is required.'); return; }
     if (!formData.Billing_Date) { setError('Billing Date is required.'); return; }
+    if (!formData.ReadingPrevious) { setError('Previous Reading is required.'); return; }
+    if (!formData.ReadingCurrent) { setError('Current Reading is required.'); return; }
+    if (!formData.RateApplied) { setError('Rate Applied is required.'); return; }
     if (!formData.Amount_Due) { setError('Amount Due is required.'); return; }
 
     try {
       const payload = {
         ...formData,
+        Bill_ID: formData.Bill_ID ? parseInt(formData.Bill_ID, 10) : undefined, // Handle if empty for create
         Customer_ID: parseInt(formData.Customer_ID, 10),
         Meter_ID: parseInt(formData.Meter_ID, 10),
-        Total_Unit: parseFloat(formData.Total_Unit) || 0,
+        ReadingPrevious: parseFloat(formData.ReadingPrevious),
+        ReadingCurrent: parseFloat(formData.ReadingCurrent),
+        RateApplied: parseFloat(formData.RateApplied),
         Amount_Due: parseFloat(formData.Amount_Due),
-        // Paid_Status is already boolean from checkbox
       };
+      delete payload.Total_Unit; // Ensure Total_Unit is not sent as it's DB generated
+
       if (isEditMode) {
         payload.Bill_ID = parseInt(formData.Bill_ID, 10);
       } else {
@@ -104,8 +120,20 @@ function BillingForm({ isOpen, onClose, onSubmit, initialData, isEditMode }) {
             <input type="date" name="Billing_Date" value={formData.Billing_Date} onChange={handleChange} required />
           </div>
           <div>
-            <label>Total Units:</label>
-            <input type="number" step="0.01" name="Total_Unit" value={formData.Total_Unit} onChange={handleChange} />
+            <label>Previous Reading:</label>
+            <input type="number" step="0.01" name="ReadingPrevious" value={formData.ReadingPrevious} onChange={handleChange} required />
+          </div>
+          <div>
+            <label>Current Reading:</label>
+            <input type="number" step="0.01" name="ReadingCurrent" value={formData.ReadingCurrent} onChange={handleChange} required />
+          </div>
+          <div>
+            <label>Rate Applied:</label>
+            <input 
+              type="number" step="0.0001" // Allow for more decimal places for rates
+              name="RateApplied" value={formData.RateApplied} 
+              onChange={handleChange} required 
+            />
           </div>
           <div>
             <label>Amount Due:</label>

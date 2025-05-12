@@ -98,6 +98,7 @@ function CustomerList() {
               <th>Address</th>
               <th>Email</th>
               <th>Phone</th>
+              <th>Registration Date</th>
               <th>Actions</th>
             </tr>
           </thead>
@@ -109,6 +110,7 @@ function CustomerList() {
                 <td>{customer.Address}</td>
                 <td>{customer.Email}</td>
                 <td>{customer.Phone_Number}</td>
+                <td>{customer.Registration_Date ? new Date(customer.Registration_Date).toLocaleDateString() : 'N/A'}</td>
                 <td>
                   <button onClick={() => handleEdit(customer)} className="btn btn-warning btn-sm">Edit</button>
                   <button onClick={() => handleDelete(customer.Customer_ID)} className="btn btn-danger btn-sm">Delete</button>
